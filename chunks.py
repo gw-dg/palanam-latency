@@ -1,4 +1,5 @@
 import cv2
+import os
 
 def get_video_chunks(path, chunk_duration=10, overlap=2, frame_size=(112, 112), target_fps=10):
     cap = cv2.VideoCapture(path)
@@ -35,26 +36,26 @@ def get_video_chunks(path, chunk_duration=10, overlap=2, frame_size=(112, 112), 
     return chunks, target_fps
 
 
-# # === RUNNING THE PIPELINE ===
-# input_video = 'videos/video1.mp4'
-# output_dir = 'output_chunks'
+# === TESTING ===
+input_video = 'videos/video1.mp4'
+output_dir = 'chunk_test'
 
-# chunks, fps = get_video_chunks(input_video)
+chunks, fps = get_video_chunks(input_video)
 
-# if not os.path.exists(output_dir):
-#     os.makedirs(output_dir)
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 
-# for i, chunk in enumerate(chunks):
-#     out_path = os.path.join(output_dir, f'chunk_{i+1}.mp4')
-#     out = cv2.VideoWriter(out_path,
-#                           cv2.VideoWriter_fourcc(*'mp4v'),
-#                           fps,
-#                           (112, 112))
+for i, chunk in enumerate(chunks):
+    out_path = os.path.join(output_dir, f'chunk_{i+1}.mp4')
+    out = cv2.VideoWriter(out_path,
+                          cv2.VideoWriter_fourcc(*'mp4v'),
+                          fps,
+                          (112, 112))
 
-#     for frame in chunk:
-#         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-#         out.write(frame_bgr)
+    for frame in chunk:
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        out.write(frame_bgr)
 
-#     out.release()
+    out.release()
 
-# print(f"✅ Saved {len(chunks)} chunks to '{output_dir}' at {fps} FPS.")
+print(f"Saved {len(chunks)} chunks to '{output_dir}' at {fps} FPS.")
