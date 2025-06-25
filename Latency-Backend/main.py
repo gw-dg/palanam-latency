@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import shutil
@@ -7,6 +7,7 @@ import uuid
 import logging
 from classify import process_video, test_classifier
 from pathlib import Path
+import tempfile
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -69,10 +70,28 @@ def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "classifier": "loaded"}
 
+def file_streamer(file_path: str):
+    """Generator function to stream file content"""
+    try:
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(8192)  # 8KB chunks
+                if not chunk:
+                    break
+                yield chunk
+    finally:
+        # Clean up the temporary file after streaming
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Cleaned up temporary file: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup file {file_path}: {e}")
+
 @app.post("/process-video/")
 async def process_uploaded_video(file: UploadFile = File(...)):
     """
-    Process uploaded video through NSFW detection model
+    Process uploaded video through NSFW detection model and stream the result
     """
     logger.info(f"Received video upload: {file.filename}")
     
@@ -133,13 +152,19 @@ async def process_uploaded_video(file: UploadFile = File(...)):
         output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
         logger.info(f"Video processing completed. Output size: {output_size_mb:.2f} MB")
         
-        # Return processed video
-        return FileResponse(
-            output_path,
+        # Clean up input file immediately
+        if os.path.exists(input_path):
+            os.remove(input_path)
+            logger.info(f"Cleaned up input file: {input_path}")
+        
+        # Stream the processed video
+        return StreamingResponse(
+            file_streamer(output_path),
             media_type="video/mp4",
-            filename=f"processed_{file.filename}",
             headers={
-                "Content-Disposition": f"attachment; filename=processed_{file.filename}"
+                "Content-Disposition": f"inline; filename=processed_{file.filename}",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache"
             }
         )
     
