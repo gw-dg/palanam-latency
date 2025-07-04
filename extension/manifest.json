@@ -1,0 +1,43 @@
+{
+    "manifest_version": 3,
+    "name": "NSFW Video Skipper",
+    "version": "1.0.0",
+    "description": "Real-time NSFW content detection and auto-skip for web videos",
+    "permissions": [
+      "activeTab",
+      "storage",
+      "scripting",
+      "webNavigation"
+    ],
+    "host_permissions": [
+      "http://localhost:8000/*",
+      "https://*/*",
+      "http://*/*"
+    ],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["content.js"],
+        "run_at": "document_end",
+        "all_frames": true
+      }
+    ],
+    "action": {
+      "default_popup": "popup.html",
+      "default_title": "NSFW Video Skipper Settings"
+    },
+    "web_accessible_resources": [
+      {
+        "resources": ["overlay.js", "video-processor.js"],
+        "matches": ["<all_urls>"]
+      }
+    ],
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
