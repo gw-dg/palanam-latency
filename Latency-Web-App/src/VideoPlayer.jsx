@@ -131,52 +131,17 @@ const VideoPlayer = () => {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Find the most recent classification for current time
-    const timeKey = Math.floor(currentTime * 2) / 2;
-    let relevantClassification = null;
-
-    for (let i = 0; i <= 4; i++) {
-      const checkTime = timeKey - i * 0.5;
-      if (classifications.has(checkTime)) {
-        relevantClassification = classifications.get(checkTime);
-        break;
-      }
-    }
-
-    if (relevantClassification) {
-      setCurrentClassification(relevantClassification);
-
-      // Draw classification overlay
-      const { label, confidence, is_nsfw } = relevantClassification;
-      const text = `${label.toUpperCase()} (${(confidence * 100).toFixed(1)}%)`;
-
-      ctx.font = "bold 24px Arial";
-      ctx.fillStyle = is_nsfw ? "#ff4444" : "#44ff44";
+    // If skipping, draw black overlay covering the entire video
+    if (isSkipping) {
+      // Fill entire canvas with black
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw skip message
+      ctx.font = "bold 32px Arial";
+      ctx.fillStyle = "#ffffff";
       ctx.strokeStyle = "#000000";
       ctx.lineWidth = 2;
-
-      ctx.strokeText(text, 20, 40);
-      ctx.fillText(text, 20, 40);
-
-      // Draw confidence bar
-      const barWidth = 200;
-      const barHeight = 8;
-      const barX = 20;
-      const barY = 50;
-
-      ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-      ctx.fillRect(barX, barY, barWidth, barHeight);
-
-      ctx.fillStyle = is_nsfw ? "#ff4444" : "#44ff44";
-      ctx.fillRect(barX, barY, barWidth * confidence, barHeight);
-    }
-
-    // Show skip indicator
-    if (isSkipping) {
-      ctx.font = "bold 32px Arial";
-      ctx.fillStyle = "#ff6600";
-      ctx.strokeStyle = "#000000";
-      ctx.lineWidth = 3;
       
       const skipText = "SKIPPING NSFW CONTENT";
       const textWidth = ctx.measureText(skipText).width;
@@ -185,6 +150,59 @@ const VideoPlayer = () => {
       
       ctx.strokeText(skipText, centerX, centerY);
       ctx.fillText(skipText, centerX, centerY);
+      
+      // Optional: Add a loading spinner or progress indicator
+      const spinnerRadius = 30;
+      const spinnerX = centerX + textWidth / 2 + 50;
+      const spinnerY = centerY;
+      const angle = (Date.now() / 100) % (2 * Math.PI);
+      
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(spinnerX, spinnerY, spinnerRadius, angle, angle + Math.PI * 1.5);
+      ctx.stroke();
+    } else {
+      // Normal overlay when not skipping
+      // Find the most recent classification for current time
+      const timeKey = Math.floor(currentTime * 2) / 2;
+      let relevantClassification = null;
+
+      for (let i = 0; i <= 4; i++) {
+        const checkTime = timeKey - i * 0.5;
+        if (classifications.has(checkTime)) {
+          relevantClassification = classifications.get(checkTime);
+          break;
+        }
+      }
+
+      if (relevantClassification) {
+        setCurrentClassification(relevantClassification);
+
+        // Draw classification overlay
+        const { label, confidence, is_nsfw } = relevantClassification;
+        const text = `${label.toUpperCase()} (${(confidence * 100).toFixed(1)}%)`;
+
+        ctx.font = "bold 24px Arial";
+        ctx.fillStyle = is_nsfw ? "#ff4444" : "#44ff44";
+        ctx.strokeStyle = "#000000";
+        ctx.lineWidth = 2;
+
+        ctx.strokeText(text, 20, 40);
+        ctx.fillText(text, 20, 40);
+
+        // Draw confidence bar
+        const barWidth = 200;
+        const barHeight = 8;
+        const barX = 20;
+        const barY = 50;
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+
+        ctx.fillStyle = is_nsfw ? "#ff4444" : "#44ff44";
+        ctx.fillRect(barX, barY, barWidth * confidence, barHeight);
+      }
     }
 
     processCurrentFrame();
