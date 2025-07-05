@@ -1,7 +1,12 @@
+# Install all dependencies with: pip install -r requirements.txt
+
 fastapi
-uvicorn
+uvicorn[standard]
 transformers
 opencv-python
 pillow
 numpy
 python-multipart
+torch
+torchvision
+torchaudio
