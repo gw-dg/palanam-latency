@@ -9,7 +9,7 @@ const VideoPlayer = () => {
   const [classifications, setClassifications] = useState(new Map());
   const [currentClassification, setCurrentClassification] = useState(null);
   const [videoInfo, setVideoInfo] = useState(null);
-  
+
   // New state for skip functionality
   const [skipSettings, setSkipSettings] = useState({
     enabled: true,
@@ -19,6 +19,9 @@ const VideoPlayer = () => {
   });
   const [isSkipping, setIsSkipping] = useState(false);
   const [skipHistory, setSkipHistory] = useState([]);
+
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [isProcessingYoutube, setIsProcessingYoutube] = useState(false);
 
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
@@ -50,46 +53,52 @@ const VideoPlayer = () => {
   }, [videoSrc]);
 
   // Skip function - handles the actual skipping logic
-  const skipNSFWContent = useCallback((classification) => {
-    if (!videoRef.current || !skipSettings.enabled || isSkipping) return;
+  const skipNSFWContent = useCallback(
+    (classification) => {
+      if (!videoRef.current || !skipSettings.enabled || isSkipping) return;
 
-    const { confidence, timestamp, is_nsfw } = classification;
-    
-    // Only skip if confidence is above threshold
-    if (!is_nsfw || confidence < skipSettings.confidenceThreshold) return;
+      const { confidence, timestamp, is_nsfw } = classification;
 
-    setIsSkipping(true);
-    const currentTime = videoRef.current.currentTime;
-    
-    // Calculate skip target time
-    const skipToTime = Math.min(
-      currentTime + skipSettings.skipDuration,
-      videoRef.current.duration - 1
-    );
+      // Only skip if confidence is above threshold
+      if (!is_nsfw || confidence < skipSettings.confidenceThreshold) return;
 
-    // Record skip event
-    const skipEvent = {
-      fromTime: currentTime,
-      toTime: skipToTime,
-      timestamp: new Date().toISOString(),
-      confidence: confidence,
-      label: classification.label
-    };
-    
-    setSkipHistory(prev => [...prev, skipEvent]);
+      setIsSkipping(true);
+      const currentTime = videoRef.current.currentTime;
 
-    // Perform the skip
-    videoRef.current.currentTime = skipToTime;
-    
-    // Show skip notification
-    console.log(`Skipped NSFW content: ${currentTime.toFixed(1)}s → ${skipToTime.toFixed(1)}s`);
-    
-    // Reset skipping state after a brief delay
-    skipTimeoutRef.current = setTimeout(() => {
-      setIsSkipping(false);
-    }, 1000);
+      // Calculate skip target time
+      const skipToTime = Math.min(
+        currentTime + skipSettings.skipDuration,
+        videoRef.current.duration - 1
+      );
 
-  }, [skipSettings, isSkipping]);
+      // Record skip event
+      const skipEvent = {
+        fromTime: currentTime,
+        toTime: skipToTime,
+        timestamp: new Date().toISOString(),
+        confidence: confidence,
+        label: classification.label,
+      };
+
+      setSkipHistory((prev) => [...prev, skipEvent]);
+
+      // Perform the skip
+      videoRef.current.currentTime = skipToTime;
+
+      // Show skip notification
+      console.log(
+        `Skipped NSFW content: ${currentTime.toFixed(
+          1
+        )}s → ${skipToTime.toFixed(1)}s`
+      );
+
+      // Reset skipping state after a brief delay
+      skipTimeoutRef.current = setTimeout(() => {
+        setIsSkipping(false);
+      }, 1000);
+    },
+    [skipSettings, isSkipping]
+  );
 
   // Real-time frame processing
   const processCurrentFrame = useCallback(async () => {
@@ -177,12 +186,12 @@ const VideoPlayer = () => {
       ctx.fillStyle = "#ff6600";
       ctx.strokeStyle = "#000000";
       ctx.lineWidth = 3;
-      
+
       const skipText = "SKIPPING NSFW CONTENT";
       const textWidth = ctx.measureText(skipText).width;
       const centerX = (canvas.width - textWidth) / 2;
       const centerY = canvas.height / 2;
-      
+
       ctx.strokeText(skipText, centerX, centerY);
       ctx.fillText(skipText, centerX, centerY);
     }
@@ -204,58 +213,180 @@ const VideoPlayer = () => {
     };
   }, [updateOverlay]);
 
-  // Handle video metadata loaded
-  const handleVideoLoaded = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
+  // Enhanced YouTube URL input component
+  const YouTubeUrlInput = ({
+    youtubeUrl,
+    setYoutubeUrl,
+    isProcessingYoutube,
+    handleYoutubeSubmit,
+  }) => (
+    <div className="mb-6">
+      <form onSubmit={handleYoutubeSubmit} className="space-y-3">
+        <div>
+          <label
+            htmlFor="youtube-url"
+            className="block text-sm font-medium text-gray-700 mb-2">
+            YouTube Video URL
+          </label>
+          <input
+            id="youtube-url"
+            type="url"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            disabled={isProcessingYoutube}
+          />
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            type="submit"
+            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            disabled={isProcessingYoutube || !youtubeUrl.trim()}>
+            {isProcessingYoutube ? (
+              <>
+                <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                Processing...
+              </>
+            ) : (
+              "🎬 Analyze YouTube Video"
+            )}
+          </button>
+          {youtubeUrl && (
+            <button
+              type="button"
+              onClick={() => setYoutubeUrl("")}
+              className="px-3 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+              disabled={isProcessingYoutube}>
+              Clear
+            </button>
+          )}
+        </div>
+      </form>
+      <div className="mt-2 text-xs text-gray-500">
+        <p>• Supports YouTube videos up to 10 minutes</p>
+        <p>• Maximum file size: 100MB</p>
+        <p>• Private, age-restricted, and live videos are not supported</p>
+      </div>
+    </div>
+  );
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.style.width = video.offsetWidth + "px";
-      canvas.style.height = video.offsetHeight + "px";
+  // Remove duplicate handleYoutubeSubmit and keep only one definition
+  const handleYoutubeSubmit = async (e) => {
+    e.preventDefault();
+    const trimmedUrl = youtubeUrl.trim();
+    if (!trimmedUrl) {
+      setError("Please enter a YouTube URL.");
+      return;
+    }
+    // Validate YouTube URL format
+    const youtubeRegex =
+      /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    if (!youtubeRegex.test(trimmedUrl)) {
+      setError(
+        "Please enter a valid YouTube URL (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...)"
+      );
+      return;
+    }
+    setIsProcessingYoutube(true);
+    setError(null);
+    cleanup();
+    try {
+      const response = await fetch("http://localhost:8000/process-youtube/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ url: trimmedUrl }),
+      });
+      let result;
+      try {
+        result = await response.json();
+      } catch (parseError) {
+        const text = await response.text();
+        throw new Error(`Server response error: ${text}`);
+      }
+      if (!response.ok) {
+        throw new Error(
+          result.detail || `HTTP ${response.status}: ${response.statusText}`
+        );
+      }
+      const newSessionId = result.session_id;
+      setSessionId(newSessionId);
+      setYoutubeUrl("");
+      setVideoSrc(`youtube-session-${newSessionId}`);
+      setTimeout(() => {
+        startWebSocketConnection(newSessionId);
+      }, 1000);
+    } catch (error) {
+      setError(
+        error.message || "Failed to process YouTube video. Please try again."
+      );
+    } finally {
+      setIsProcessingYoutube(false);
     }
   };
 
   // WebSocket message handler with skip logic
-  const handleWebSocketMessage = useCallback((event) => {
-    try {
-      const data = JSON.parse(event.data);
+  const handleWebSocketMessage = useCallback(
+    (event) => {
+      try {
+        const data = JSON.parse(event.data);
 
-      switch (data.type) {
-        case "video_info":
-          setVideoInfo(data);
-          console.log("Video info received:", data);
-          break;
+        switch (data.type) {
+          case "video_info":
+            setVideoInfo(data);
+            console.log("Video info received:", data);
 
-        case "classification":
-          const timeKey = Math.floor(data.timestamp * 2) / 2;
-          setClassifications((prev) => new Map(prev.set(timeKey, data)));
-          console.log("Classification received:", data);
-          
-          // Handle auto-skip
-          if (data.is_nsfw && skipSettings.enabled) {
-            skipNSFWContent(data);
-          }
-          break;
+            // For YouTube videos, we need to set the video source after getting video info
+            if (videoSrc && videoSrc.startsWith("youtube-session-")) {
+              // Create a blob URL or use the session ID to get the video
+              // The backend should serve the video file at a specific endpoint
+              const sessionId = videoSrc.replace("youtube-session-", "");
+              const videoUrl = `http://localhost:8000/get-video/${sessionId}`;
+              setVideoSrc(videoUrl);
+            }
+            break;
 
-        case "connection_established":
-          setIsConnected(true);
-          console.log("WebSocket connection established");
-          break;
+          case "classification":
+            const timeKey = Math.floor(data.timestamp * 2) / 2;
+            setClassifications((prev) => new Map(prev.set(timeKey, data)));
+            console.log("Classification received:", data);
 
-        case "error":
-          setError(data.message);
-          setIsConnected(false);
-          break;
+            // Handle auto-skip
+            if (data.is_nsfw && skipSettings.enabled) {
+              skipNSFWContent(data);
+            }
+            break;
 
-        default:
-          console.log("Unknown message type:", data.type);
+          case "connection_established":
+            setIsConnected(true);
+            console.log("WebSocket connection established");
+            break;
+
+          case "error":
+            console.error("WebSocket error:", data.message);
+            setError(data.message);
+            setIsConnected(false);
+            break;
+
+          case "ping":
+            // Respond to ping with pong
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: "pong" }));
+            }
+            break;
+
+          default:
+            console.log("Unknown message type:", data.type);
+        }
+      } catch (error) {
+        console.error("Error parsing WebSocket message:", error);
       }
-    } catch (error) {
-      console.error("Error parsing WebSocket message:", error);
-    }
-  }, [skipSettings, skipNSFWContent]);
+    },
+    [skipSettings, skipNSFWContent, videoSrc]
+  );
 
   // Start WebSocket connection
   const startWebSocketConnection = useCallback(
@@ -277,7 +408,9 @@ const VideoPlayer = () => {
 
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
-        setError("WebSocket connection failed. Make sure the server is running.");
+        setError(
+          "WebSocket connection failed. Make sure the server is running."
+        );
         setIsConnected(false);
       };
 
@@ -386,24 +519,28 @@ const VideoPlayer = () => {
       {/* Skip Settings Panel */}
       {videoSrc && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <h3 className="font-semibold text-gray-800 mb-3">Auto-Skip Settings</h3>
+          <h3 className="font-semibold text-gray-800 mb-3">
+            Auto-Skip Settings
+          </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="flex items-center space-x-2">
               <input
                 type="checkbox"
                 id="skipEnabled"
                 checked={skipSettings.enabled}
-                onChange={(e) => setSkipSettings(prev => ({
-                  ...prev,
-                  enabled: e.target.checked
-                }))}
+                onChange={(e) =>
+                  setSkipSettings((prev) => ({
+                    ...prev,
+                    enabled: e.target.checked,
+                  }))
+                }
                 className="rounded"
               />
               <label htmlFor="skipEnabled" className="text-sm font-medium">
                 Auto-Skip Enabled
               </label>
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium mb-1">
                 Skip Duration (seconds)
@@ -413,14 +550,16 @@ const VideoPlayer = () => {
                 min="1"
                 max="30"
                 value={skipSettings.skipDuration}
-                onChange={(e) => setSkipSettings(prev => ({
-                  ...prev,
-                  skipDuration: parseInt(e.target.value) || 5
-                }))}
+                onChange={(e) =>
+                  setSkipSettings((prev) => ({
+                    ...prev,
+                    skipDuration: parseInt(e.target.value) || 5,
+                  }))
+                }
                 className="w-full px-2 py-1 border rounded text-sm"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium mb-1">
                 Confidence Threshold
@@ -431,17 +570,19 @@ const VideoPlayer = () => {
                 max="1"
                 step="0.1"
                 value={skipSettings.confidenceThreshold}
-                onChange={(e) => setSkipSettings(prev => ({
-                  ...prev,
-                  confidenceThreshold: parseFloat(e.target.value)
-                }))}
+                onChange={(e) =>
+                  setSkipSettings((prev) => ({
+                    ...prev,
+                    confidenceThreshold: parseFloat(e.target.value),
+                  }))
+                }
                 className="w-full"
               />
               <div className="text-xs text-gray-600 text-center">
                 {(skipSettings.confidenceThreshold * 100).toFixed(0)}%
               </div>
             </div>
-            
+
             <div className="text-sm">
               <div className="font-medium">Skip History</div>
               <div className="text-gray-600">
@@ -452,34 +593,48 @@ const VideoPlayer = () => {
         </div>
       )}
 
-      {!videoSrc && !isUploading ? (
+      {!videoSrc && !isUploading && !isProcessingYoutube ? (
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center bg-gray-50">
+          {/* Use enhanced YouTube input component */}
+          <YouTubeUrlInput
+            youtubeUrl={youtubeUrl}
+            setYoutubeUrl={setYoutubeUrl}
+            isProcessingYoutube={isProcessingYoutube}
+            handleYoutubeSubmit={handleYoutubeSubmit}
+          />
           <input
             ref={fileInputRef}
             type="file"
             accept="video/*"
             onChange={handleFileUpload}
             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 mb-4"
+            disabled={isProcessingYoutube}
           />
           <p className="text-gray-600">
-            Select a video file to analyze and auto-skip NSFW content
+            Select a video file or paste a YouTube URL to analyze and auto-skip
+            NSFW content
           </p>
         </div>
-      ) : isUploading ? (
+      ) : isUploading || isProcessingYoutube ? (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600">Uploading video...</p>
+          <p className="text-gray-600">
+            {isUploading ? "Uploading video..." : "Processing YouTube video..."}
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
           {/* Connection Status */}
-          <div className={`p-3 rounded-lg text-sm font-medium ${
-            isConnected
-              ? "bg-green-50 border border-green-200 text-green-700"
-              : "bg-yellow-50 border border-yellow-200 text-yellow-700"
-          }`}>
+          <div
+            className={`p-3 rounded-lg text-sm font-medium ${
+              isConnected
+                ? "bg-green-50 border border-green-200 text-green-700"
+                : "bg-yellow-50 border border-yellow-200 text-yellow-700"
+            }`}>
             {isConnected
-              ? `🟢 Connected - Auto-skip ${skipSettings.enabled ? 'ENABLED' : 'DISABLED'}`
+              ? `🟢 Connected - Auto-skip ${
+                  skipSettings.enabled ? "ENABLED" : "DISABLED"
+                }`
               : "🟡 Connecting to processing server..."}
           </div>
 
@@ -511,9 +666,12 @@ const VideoPlayer = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <span className="text-gray-600">Label:</span>
-                  <div className={`font-bold ${
-                    currentClassification.is_nsfw ? "text-red-600" : "text-green-600"
-                  }`}>
+                  <div
+                    className={`font-bold ${
+                      currentClassification.is_nsfw
+                        ? "text-red-600"
+                        : "text-green-600"
+                    }`}>
                     {currentClassification.label.toUpperCase()}
                   </div>
                 </div>
@@ -531,8 +689,11 @@ const VideoPlayer = () => {
                 </div>
                 <div>
                   <span className="text-gray-600">Status:</span>
-                  <div className={`font-bold ${isSkipping ? 'text-orange-600' : 'text-gray-600'}`}>
-                    {isSkipping ? 'SKIPPING' : 'PLAYING'}
+                  <div
+                    className={`font-bold ${
+                      isSkipping ? "text-orange-600" : "text-gray-600"
+                    }`}>
+                    {isSkipping ? "SKIPPING" : "PLAYING"}
                   </div>
                 </div>
               </div>
@@ -548,8 +709,8 @@ const VideoPlayer = () => {
               <div className="max-h-32 overflow-y-auto">
                 {skipHistory.slice(-5).map((skip, index) => (
                   <div key={index} className="text-sm text-gray-600 mb-1">
-                    {skip.fromTime.toFixed(1)}s → {skip.toTime.toFixed(1)}s 
-                    ({skip.label}, {(skip.confidence * 100).toFixed(1)}%)
+                    {skip.fromTime.toFixed(1)}s → {skip.toTime.toFixed(1)}s (
+                    {skip.label}, {(skip.confidence * 100).toFixed(1)}%)
                   </div>
                 ))}
               </div>
@@ -565,7 +726,9 @@ const VideoPlayer = () => {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                 <div>
                   <span className="text-gray-600">Duration:</span>
-                  <div className="font-bold">{videoInfo.duration.toFixed(1)}s</div>
+                  <div className="font-bold">
+                    {videoInfo.duration.toFixed(1)}s
+                  </div>
                 </div>
                 <div>
                   <span className="text-gray-600">FPS:</span>
