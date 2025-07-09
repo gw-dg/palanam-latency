@@ -315,7 +315,8 @@ const VideoPlayer = () => {
       const newSessionId = result.session_id;
       setSessionId(newSessionId);
       setYoutubeUrl("");
-      setVideoSrc(`youtube-session-${newSessionId}`);
+      const videoUrl = `http://localhost:8000/get-video/${newSessionId}`;
+      setVideoSrc(videoUrl);
       setTimeout(() => {
         startWebSocketConnection(newSessionId);
       }, 1000);
@@ -338,15 +339,6 @@ const VideoPlayer = () => {
           case "video_info":
             setVideoInfo(data);
             console.log("Video info received:", data);
-
-            // For YouTube videos, we need to set the video source after getting video info
-            if (videoSrc && videoSrc.startsWith("youtube-session-")) {
-              // Create a blob URL or use the session ID to get the video
-              // The backend should serve the video file at a specific endpoint
-              const sessionId = videoSrc.replace("youtube-session-", "");
-              const videoUrl = `http://localhost:8000/get-video/${sessionId}`;
-              setVideoSrc(videoUrl);
-            }
             break;
 
           case "classification":
@@ -385,7 +377,7 @@ const VideoPlayer = () => {
         console.error("Error parsing WebSocket message:", error);
       }
     },
-    [skipSettings, skipNSFWContent, videoSrc]
+    [skipSettings, skipNSFWContent]
   );
 
   // Start WebSocket connection
@@ -496,6 +488,15 @@ const VideoPlayer = () => {
   useEffect(() => {
     return cleanup;
   }, [cleanup]);
+
+  const handleVideoLoaded = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-6 font-sans">

@@ -9,10 +9,11 @@ import json
 from typing import Dict
 from pathlib import Path
 import cv2
-from transformers import pipeline
+from transformers.pipelines import pipeline
 from PIL import Image
 import numpy as np
 import time
+import subprocess
 
 # Add this import for YouTube download support
 try:
@@ -395,17 +396,12 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/process-youtube/")
 async def process_youtube_video(data: dict = Body(...)):
-    """Download a YouTube video, save it, and return a session ID with improved error handling"""
-    if YouTube is None:
-        raise HTTPException(
-            status_code=500, 
-            detail="YouTube processing is not available. pytube is not installed on the server."
-        )
-    
+    """Download a YouTube video using yt-dlp, save it, and return a session ID with improved error handling. Supports optional 'cookies' in POST body for authenticated downloads."""
     url = data.get("url")
+    cookies = data.get("cookies")  # Optional: string (Netscape or JSON format)
     if not url:
         raise HTTPException(status_code=400, detail="YouTube URL is required.")
-    
+
     # Validate URL format
     if not (url.startswith("https://www.youtube.com/watch?v=") or 
             url.startswith("https://youtu.be/") or
@@ -415,88 +411,72 @@ async def process_youtube_video(data: dict = Body(...)):
             status_code=400, 
             detail="Invalid YouTube URL format. Please use a valid YouTube video URL."
         )
-    
+
     session_id = str(uuid.uuid4())
     filename = f"video_{session_id}.mp4"
     file_path = os.path.join(TEMP_DIR, filename)
-    
+    cookies_path = None
+
     try:
         logger.info(f"=== YOUTUBE PROCESSING STARTED ===")
         logger.info(f"URL: {url}")
         logger.info(f"Session ID: {session_id}")
-        
-        # Create YouTube object with timeout
-        yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
-        
-        # Get video info
-        logger.info(f"Video title: {yt.title}")
-        logger.info(f"Video length: {yt.length}s")
-        logger.info(f"Video views: {yt.views}")
-        
-        # Check video length (limit to 10 minutes for processing efficiency)
-        if yt.length > 600:  # 10 minutes
-            raise HTTPException(
-                status_code=400, 
-                detail="Video is too long. Please use videos shorter than 10 minutes."
-            )
-        
-        # Get available streams
-        streams = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution')
-        
-        if not streams:
-            # Try adaptive streams if progressive not available
-            video_streams = yt.streams.filter(adaptive=True, file_extension='mp4', only_video=True)
-            audio_streams = yt.streams.filter(adaptive=True, file_extension='mp4', only_audio=True)
-            
-            if not video_streams or not audio_streams:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="No suitable video streams found. This video may not be available for download."
-                )
-            
-            # For simplicity, we'll use the lowest quality progressive stream if available
-            # or fall back to video-only stream
-            stream = video_streams.order_by('resolution').first()
-        else:
-            # Use medium quality progressive stream (360p or 480p preferred)
-            stream = None
-            for s in streams:
-                if s.resolution in ['360p', '480p']:
-                    stream = s
-                    break
-            
-            # If no preferred resolution, use the first available
-            if not stream:
-                stream = streams.first()
-        
-        logger.info(f"Selected stream: {stream.resolution} - {stream.filesize} bytes")
-        
-        # Check if estimated file size is too large
-        if stream.filesize and stream.filesize > 100 * 1024 * 1024:  # 100MB
-            raise HTTPException(
-                status_code=400, 
-                detail="Video file is too large. Please use a shorter or lower quality video."
-            )
-        
-        # Download the video
-        logger.info(f"Starting download to: {file_path}")
-        stream.download(output_path=TEMP_DIR, filename=filename)
-        
-        # Verify download
+
+        # If cookies provided, save to a temp file
+        if cookies:
+            cookies_path = os.path.join(TEMP_DIR, f"cookies_{session_id}.txt")
+            with open(cookies_path, "w", encoding="utf-8") as f:
+                f.write(cookies)
+            logger.info(f"Saved cookies to {cookies_path}")
+
+        # yt-dlp command to download best mp4 under 10 minutes and 100MB
+        ytdlp_cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "--max-filesize", "100M",
+            "--match-filter", "duration < 600",
+            "-f", "best[ext=mp4]",
+            "-o", file_path,
+            url
+        ]
+        if cookies_path:
+            ytdlp_cmd.extend(["--cookies", cookies_path])
+        logger.info(f"Running yt-dlp: {' '.join(ytdlp_cmd)}")
+        result = subprocess.run(ytdlp_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"yt-dlp failed: {result.stderr}")
+            raise HTTPException(status_code=400, detail=f"yt-dlp error: {result.stderr}")
+
+        # If file does not exist, try to find the downloaded file (yt-dlp may add extension)
         if not os.path.exists(file_path):
-            raise Exception("Download completed but file was not created")
-        
+            candidates = [f for f in os.listdir(TEMP_DIR) if f.startswith(f"video_{session_id}")]
+            if candidates:
+                file_path = os.path.join(TEMP_DIR, candidates[0])
+            else:
+                raise HTTPException(status_code=500, detail="yt-dlp did not produce a video file.")
+
+        # Optionally, convert to mp4 using ffmpeg if not already mp4
+        if not file_path.endswith(".mp4"):
+            mp4_path = os.path.join(TEMP_DIR, f"video_{session_id}.mp4")
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-i", file_path, "-c:v", "copy", "-c:a", "aac", mp4_path
+            ]
+            logger.info(f"Converting to mp4: {' '.join(ffmpeg_cmd)}")
+            ffmpeg_result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            if ffmpeg_result.returncode != 0:
+                logger.error(f"ffmpeg failed: {ffmpeg_result.stderr}")
+                raise HTTPException(status_code=500, detail=f"ffmpeg error: {ffmpeg_result.stderr}")
+            os.remove(file_path)
+            file_path = mp4_path
+
         actual_file_size = os.path.getsize(file_path)
-        logger.info(f"Download completed. File size: {actual_file_size} bytes")
-        
-        # Double-check file size after download
         if actual_file_size > 100 * 1024 * 1024:
             os.remove(file_path)
             raise HTTPException(
                 status_code=400, 
                 detail="Downloaded file is too large. Maximum size is 100MB."
             )
-        
+
         # Verify video file integrity with OpenCV
         try:
             test_cap = cv2.VideoCapture(file_path)
@@ -504,69 +484,45 @@ async def process_youtube_video(data: dict = Body(...)):
                 test_cap.release()
                 os.remove(file_path)
                 raise Exception("Downloaded video file is corrupted or not readable")
-            
-            # Try to read first frame
             ret, frame = test_cap.read()
             test_cap.release()
-            
             if not ret:
                 os.remove(file_path)
                 raise Exception("Downloaded video file has no readable frames")
-                
         except Exception as e:
             logger.error(f"Video integrity check failed: {e}")
             if os.path.exists(file_path):
                 os.remove(file_path)
-            raise Exception("Downloaded video file is corrupted")
-        
+            raise HTTPException(status_code=500, detail="Downloaded video file is corrupted")
+
         logger.info(f"=== YOUTUBE PROCESSING COMPLETED ===")
-        
+
         return {
             "session_id": session_id,
-            "filename": yt.title,
-            "duration": yt.length,
+            "filename": filename,
             "file_size_mb": round(actual_file_size / (1024 * 1024), 2),
-            "resolution": stream.resolution,
             "message": "YouTube video downloaded and verified successfully. Connect to WebSocket for real-time processing."
         }
-        
+
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
         logger.error(f"YouTube processing failed: {str(e)}")
-        logger.error(f"Exception type: {type(e).__name__}")
-        
-        # Clean up on error
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
                 logger.info(f"Cleaned up failed download: {file_path}")
             except:
                 pass
-        
-        # Handle specific pytube errors
-        if pytube_exceptions:
-            if isinstance(e, pytube_exceptions.RegexMatchError):
-                msg = "Invalid YouTube URL or video not found. Please check the URL and try again."
-            elif isinstance(e, pytube_exceptions.VideoUnavailable):
-                msg = "This video is unavailable. It may be private, deleted, or region-restricted."
-            elif isinstance(e, pytube_exceptions.AgeRestrictedError):
-                msg = "This video is age-restricted and cannot be processed."
-            elif isinstance(e, pytube_exceptions.LiveStreamError):
-                msg = "Live streams cannot be processed. Please use a regular video."
-            elif isinstance(e, pytube_exceptions.MembersOnly):
-                msg = "This video is members-only and cannot be accessed."
-            elif isinstance(e, pytube_exceptions.RecordingUnavailable):
-                msg = "This video recording is unavailable."
-            elif "Sign in to confirm your age" in str(e):
-                msg = "This video requires age verification and cannot be processed."
-            else:
-                msg = f"YouTube processing error: {str(e)}"
-        else:
-            msg = f"YouTube processing error: {str(e)}"
-        
-        raise HTTPException(status_code=500, detail=msg)
+        raise HTTPException(status_code=500, detail=f"YouTube processing error: {str(e)}")
+    finally:
+        # Clean up cookies file if used
+        if cookies_path and os.path.exists(cookies_path):
+            try:
+                os.remove(cookies_path)
+                logger.info(f"Deleted cookies file: {cookies_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete cookies file: {cookies_path} ({e})")
 
 @app.get("/get-video/{session_id}")
 async def get_video(session_id: str):
@@ -779,35 +735,24 @@ async def debug_sessions():
 async def test_youtube_availability():
     """Test if YouTube processing is available"""
     try:
-        if YouTube is None:
-            return {
-                "available": False,
-                "error": "pytube not installed",
-                "suggestion": "Install pytube with: pip install pytube"
-            }
-        
-        # Test with a simple video
-        test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll for testing
-        
+        # yt-dlp is now a subprocess, so we just check if it's installed
         try:
-            yt = YouTube(test_url)
-            streams = yt.streams.filter(progressive=True, file_extension='mp4')
-            
+            subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
             return {
                 "available": True,
-                "test_video": {
-                    "title": yt.title,
-                    "length": yt.length,
-                    "views": yt.views,
-                    "streams_count": len(streams)
-                },
-                "pytube_version": "Available"
+                "message": "yt-dlp is installed and available for testing."
+            }
+        except FileNotFoundError:
+            return {
+                "available": False,
+                "error": "yt-dlp not found. Please install it: pip install yt-dlp",
+                "suggestion": "Install yt-dlp with: pip install yt-dlp"
             }
         except Exception as e:
             return {
                 "available": False,
-                "error": f"YouTube access failed: {str(e)}",
-                "suggestion": "Check internet connection and YouTube availability"
+                "error": f"yt-dlp test failed: {str(e)}",
+                "suggestion": "Check internet connection and yt-dlp installation"
             }
     except Exception as e:
         return {
@@ -887,11 +832,11 @@ TROUBLESHOOTING_STEPS = {
         "Verify YouTube URL format",
         "Ensure video is not private/age-restricted",
         "Try a different video",
-        "Check if pytube is installed: pip install pytube",
-        "Update pytube: pip install --upgrade pytube"
+        "Check if yt-dlp is installed: pip install yt-dlp",
+        "Update yt-dlp: pip install --upgrade yt-dlp"
     ],
     "classification_fails": [
-        "Check if transformers is installed: pip install transformers",
+        "Check if transformers is installed: pip install transformers torch",
         "Verify model name: perrytheplatypus/falconsai-finetuned-nsfw-detect",
         "Check internet connection for model download",
         "Try restarting the server",
@@ -919,7 +864,7 @@ async def get_troubleshooting_guide():
     return {
         "troubleshooting_steps": TROUBLESHOOTING_STEPS,
         "common_errors": {
-            "pytube_not_installed": "Install with: pip install pytube",
+            "yt_dlp_not_installed": "Install with: pip install yt-dlp",
             "transformers_not_installed": "Install with: pip install transformers torch",
             "opencv_not_installed": "Install with: pip install opencv-python",
             "video_too_large": "Use videos smaller than 100MB",
@@ -933,7 +878,7 @@ async def get_troubleshooting_guide():
                 "transformers",
                 "torch",
                 "opencv-python",
-                "pytube",
+                "yt-dlp",
                 "pillow",
                 "numpy"
             ]
