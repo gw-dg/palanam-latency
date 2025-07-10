@@ -22,6 +22,7 @@ const VideoPlayer = () => {
 
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [isProcessingYoutube, setIsProcessingYoutube] = useState(false);
+  const [youtubeCookies, setYoutubeCookies] = useState("");
 
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
@@ -217,6 +218,8 @@ const VideoPlayer = () => {
   const YouTubeUrlInput = ({
     youtubeUrl,
     setYoutubeUrl,
+    youtubeCookies,
+    setYoutubeCookies,
     isProcessingYoutube,
     handleYoutubeSubmit,
   }) => (
@@ -237,6 +240,25 @@ const VideoPlayer = () => {
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isProcessingYoutube}
           />
+        </div>
+        <div>
+          <label
+            htmlFor="youtube-cookies"
+            className="block text-sm font-medium text-gray-700 mb-2">
+            YouTube Cookies (optional)
+          </label>
+          <textarea
+            id="youtube-cookies"
+            value={youtubeCookies}
+            onChange={(e) => setYoutubeCookies(e.target.value)}
+            placeholder="Paste cookies here from the extension if needed for private/age-restricted videos."
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+            rows={3}
+            disabled={isProcessingYoutube}
+          />
+          <div className="text-xs text-gray-500 mt-1">
+            Use the <b>NSFW Video Skipper - Cookie Extractor</b> extension to extract your YouTube cookies and paste them here for private/age-restricted videos.
+          </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
           <button
@@ -266,7 +288,7 @@ const VideoPlayer = () => {
       <div className="mt-2 text-xs text-gray-500">
         <p>• Supports YouTube videos up to 10 minutes</p>
         <p>• Maximum file size: 100MB</p>
-        <p>• Private, age-restricted, and live videos are not supported</p>
+        <p>• Private, age-restricted, and live videos are not supported unless you provide cookies</p>
       </div>
     </div>
   );
@@ -284,7 +306,7 @@ const VideoPlayer = () => {
       /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
     if (!youtubeRegex.test(trimmedUrl)) {
       setError(
-        "Please enter a valid YouTube URL (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...)"
+        "Please enter a valid YouTube URL (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...)",
       );
       return;
     }
@@ -298,7 +320,7 @@ const VideoPlayer = () => {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({ url: trimmedUrl }),
+        body: JSON.stringify({ url: trimmedUrl, cookies: youtubeCookies.trim() || undefined }),
       });
       let result;
       try {
@@ -309,12 +331,13 @@ const VideoPlayer = () => {
       }
       if (!response.ok) {
         throw new Error(
-          result.detail || `HTTP ${response.status}: ${response.statusText}`
+          result.detail || `HTTP ${response.status}: ${response.statusText}`,
         );
       }
       const newSessionId = result.session_id;
       setSessionId(newSessionId);
       setYoutubeUrl("");
+      setYoutubeCookies("");
       const videoUrl = `http://localhost:8000/get-video/${newSessionId}`;
       setVideoSrc(videoUrl);
       setTimeout(() => {
@@ -322,7 +345,7 @@ const VideoPlayer = () => {
       }, 1000);
     } catch (error) {
       setError(
-        error.message || "Failed to process YouTube video. Please try again."
+        error.message || "Failed to process YouTube video. Please try again.",
       );
     } finally {
       setIsProcessingYoutube(false);
@@ -600,6 +623,8 @@ const VideoPlayer = () => {
           <YouTubeUrlInput
             youtubeUrl={youtubeUrl}
             setYoutubeUrl={setYoutubeUrl}
+            youtubeCookies={youtubeCookies}
+            setYoutubeCookies={setYoutubeCookies}
             isProcessingYoutube={isProcessingYoutube}
             handleYoutubeSubmit={handleYoutubeSubmit}
           />
